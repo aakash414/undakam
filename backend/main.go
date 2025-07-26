@@ -1,20 +1,26 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
-	"regexp"
+	"net/http"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 type ParsedRecipe struct {
-	Dish       string `json:"dish"`
-	Style      string `json:"style"`
-	Servings   string `json:"servings"`
-	Difficulty string `json:"difficulty"`
-	Raw        string `json:"raw"`
+	Dish     string `json:"dish"`
+	Style    string `json:"style"`
+	Servings string `json:"servings"`
+	Raw      string `json:"raw"`
 }
 
 type Recipe struct {
@@ -25,9 +31,8 @@ type Recipe struct {
 	Steps       []string `json:"steps"`
 }
 
-var patterns = map[string]*regexp.Regexp{
-	"servings":   regexp.MustCompile(`for(\d+)`),
-	"difficulty": regexp.MustCompile(`(easy|medium|hard|simple|quick)`),
+func init() {
+	godotenv.Load()
 }
 
 func main() {
@@ -84,73 +89,139 @@ func extractSubdomain(host string) string {
 func parseSubdomain(subdomain string) *ParsedRecipe {
 	parts := strings.Split(subdomain, "-")
 
-	parsed := &ParsedRecipe{
-		Raw: subdomain,
-	}
+	parsed := &ParsedRecipe{Raw: subdomain}
 
-	if match := patterns["servings"].FindStringSubmatch(subdomain); len(match) > 1 {
-		parsed.Servings = match[1]
-	}
-
-	if match := patterns["difficulty"].FindString(subdomain); match != "" {
-		parsed.Difficulty = match
-	}
-
-	dish := []string{}
 	for _, part := range parts {
-		if !isModifier(part) {
-			dish = append(dish, part)
-			if len(dish) >= 2 {
+		if strings.HasPrefix(part, "for") && len(part) > 3 {
+			if num := part[3:]; isNumeric(num) {
+				parsed.Servings = num
 				break
 			}
 		}
 	}
-	parsed.Dish = strings.Join(dish, " ")
 
-	style := []string{}
+	var dishParts, styleParts []string
 	for _, part := range parts {
-		if part != parsed.Difficulty && !patterns["servings"].MatchString(part) {
-			found := false
-			for _, dishPart := range strings.Split(parsed.Dish, " ") {
-				if part == dishPart {
-					found = true
-					break
-				}
-			}
-			if !found {
-				style = append(style, part)
-			}
+		if strings.HasPrefix(part, "for") {
+			continue
+		}
+		if len(dishParts) < 2 {
+			dishParts = append(dishParts, part)
+		} else {
+			styleParts = append(styleParts, part)
 		}
 	}
-	if len(style) > 0 {
-		parsed.Style = strings.Join(style, " ")
+
+	parsed.Dish = strings.Join(dishParts, " ")
+	if len(styleParts) > 0 {
+		parsed.Style = strings.Join(styleParts, " ")
 	}
 
 	return parsed
 }
 
-func isModifier(word string) bool {
-	modifiers := []string{"easy", "medium", "hard", "simple", "quick"}
-	for _, mod := range modifiers {
-		if word == mod {
-			return true
-		}
-	}
-	return patterns["servings"].MatchString(word)
+func isNumeric(s string) bool {
+	_, err := strconv.Atoi(s)
+	return err == nil
 }
 
 func generateRecipe(dish, style, servings string) (*Recipe, error) {
-	// For now, return a mock recipe
-	dishName := dish
-	if style != "" {
-		dishName = style + " " + dish
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("GEMINI_API_KEY not set")
 	}
 
-	return &Recipe{
-		Name:        dishName,
-		Servings:    4,
-		CookTime:    30,
-		Ingredients: []string{"Mock ingredient 1", "Mock ingredient 2"},
-		Steps:       []string{"Mock step 1", "Mock step 2"},
-	}, nil
+	servingCount := 4
+	if servings != "" {
+		if count, err := strconv.Atoi(servings); err == nil && count > 0 {
+			servingCount = count
+		}
+	}
+
+	recipeName := dish
+	if style != "" {
+		recipeName = style + " " + dish
+	}
+
+	prompt := fmt.Sprintf(`You are a recipe API that returns ONLY valid JSON. No explanations, no markdown, no code blocks. Always start with { and end with }.
+
+	Create a recipe for "%s" for %d people.
+
+	Required format:
+	{
+	"name": "string",
+	"servings": number,
+	"cookTime": number,
+	"ingredients": ["string with measurements"],
+	"steps": ["string"]
+	}
+
+	Recipe:`, recipeName, servingCount)
+
+	payload := map[string]any{
+		"contents": []map[string]any{
+			{"parts": []map[string]string{{"text": prompt}}},
+		},
+		"generationConfig": map[string]any{
+			"temperature":     0.3,
+			"maxOutputTokens": 800,
+		},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=%s", apiKey)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	text, err := extractGeminiText(result)
+	if err != nil {
+		return nil, err
+	}
+
+	var recipe Recipe
+	if err := json.Unmarshal([]byte(text), &recipe); err != nil {
+		return nil, fmt.Errorf("failed to parse recipe JSON: %v", err)
+	}
+
+	return &recipe, nil
+}
+
+func extractGeminiText(result map[string]any) (string, error) {
+	candidates, ok := result["candidates"].([]any)
+	if !ok || len(candidates) == 0 {
+		return "", fmt.Errorf("no candidates in response")
+	}
+
+	candidate := candidates[0].(map[string]any)
+	content := candidate["content"].(map[string]any)
+	parts := content["parts"].([]any)
+
+	if len(parts) == 0 {
+		return "", fmt.Errorf("no parts in response")
+	}
+
+	part := parts[0].(map[string]any)
+	text, ok := part["text"].(string)
+	if !ok {
+		return "", fmt.Errorf("no text in response part")
+	}
+
+	return text, nil
 }
