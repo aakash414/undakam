@@ -1,61 +1,84 @@
 <template>
   <div class="container">
-    <div class="test-card">
-      <h1>Undakam Recipe Test</h1>
-      
-      <div class="input-group">
-        <label for="subdomain">Recipe Subdomain:</label>
-        <input 
-          id="subdomain"
-          v-model="testSubdomain" 
-          placeholder="chicken-curry-nadan-for10-eluppam"
-          @keyup.enter="testRecipe"
-          :disabled="loading"
+  <div v-if="!result && !loading" class="hero-section">
+    <div class="title-container">
+      <h1 class="title">Undakam Recipe Maker</h1>
+      <p>generate recipe from simple discription</p>
+    </div>
+    <div class="search-section">
+      <div class="search-container">
+        <input
+          type="text"
+          v-model="searchInput"
+          placeholder="chicken-curry-nadan-for10"
+          class="search-input"
         />
-        <button 
-          @click="testRecipe"
-          :disabled="loading || !testSubdomain.trim()"
-          class="test-btn"
-        >
-          {{ loading ? 'Loading...' : 'Test Recipe' }}
-        </button>
-      </div>
-
-      <div v-if="error" class="error">
-        Error: {{ error }}
-      </div>
-
-      <div v-if="result" class="result">
-        <h3>Recipe</h3>
-        <pre>{{ JSON.stringify(result, null, 2) }}</pre>
-      </div>
-
-      <div v-if="loading" class="loading">
-        Fetching data
+        <button class="search-btn" @click="searchRecipe">Generate Recipe</button>
       </div>
     </div>
+  </div>
+
+  <div v-if="loading">
+    <div class="loading-section">
+      <h2>Loading...</h2>
+      <p>Please wait while we fetch your recipe.</p>
+    </div>
+  </div>
+
+  <div v-if="result && !loading" class="recipe-section">
+    <div class="recipe-title">
+      <h2>{{ result.name }}</h2>
+      <div class="recipe-details">
+        <div>
+          <span class="recipe-time">Time: {{ result.cookTime }} minutes</span>
+          <span class="recipe-servings">Servings: {{ result.servings }}</span>
+        </div>
+        <div class="recipe-ingredients">
+          <h2>Ingredients</h2>
+          <ul>
+            <li v-for="ingredient in result.ingredients">
+               {{ ingredient }} 
+            </li>
+          </ul>
+        </div>
+        <div class="recipe-instructions">
+          <h2>Instructions</h2>
+          <ol>
+            <li v-for="step in result.steps" >
+              {{ step }}
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
   </div>
 </template>
 
 <script setup>
 const { fetchRecipe } = useRecipe()
-const testSubdomain = ref('chicken-curry-nadan-for10-eluppam')
+const searchInput = ref('')
 const result = ref(null)
 const loading = ref(false)
 const error = ref(null)
 
-const testRecipe = async () => {
-  if (!testSubdomain.value.trim()) return
-  
+const searchRecipe = async () => {
+  if (!searchInput.value.trim()) return
+
   loading.value = true
   error.value = null
-  result.value = null
+  result.value = null 
   
   try {
-    console
-    const data = await fetchRecipe(testSubdomain.value.trim())
-    result.value = data
-    
+    console.log('fetching recipe:', searchInput.value.trim())
+    const data = await fetchRecipe(searchInput.value.trim())
+    console.log('recipe data:', data) 
+    console.log('recipe result:', data.recipe)
+    result.value = data.recipe
+    if (!result.value) {
+      throw new Error('No recipe found')
+    }
+    console.log('recipe fetched:', result.steps)
     if (!data) {
       error.value = 'no data'
     }
@@ -67,25 +90,29 @@ const testRecipe = async () => {
 }
 
 onMounted(() => {
-  testRecipe()
-})
+    const path = window.location.pathname.slice(1) 
+    
+    if (path && path !== '') {
+        searchInput.value = path
+        searchRecipe()
+        return
+    }
+    
+    const subdomain = window.location.hostname.split('.')[0]
+    if (subdomain && subdomain !== 'www' && subdomain !== 'localhost') {
+        searchInput.value = subdomain
+        searchRecipe()
+    }})
 </script>
 
 <style scoped>
 .container {
-  max-width: 800px;
-  margin: 2rem auto;
+  min-height: 100vh;
+  display: flex;
   padding: 1rem;
   font-family: system-ui, -apple-system, sans-serif;
 }
 
-.test-card {
-  background: white;
-  border-radius: 12px;
-  padding: 2rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e5e7eb;
-}
 
 h1 {
   text-align: center;
@@ -98,12 +125,6 @@ h1 {
   margin-bottom: 1.5rem;
 }
 
-label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 600;
-  color: #374151;
-}
 
 input {
   width: 100%;
@@ -125,75 +146,21 @@ input:disabled {
   cursor: not-allowed;
 }
 
-.test-btn {
-  width: 100%;
-  padding: 0.75rem 1.5rem;
+.search-btn {
   background-color: #3b82f6;
   color: white;
+  padding: 0.75rem 1.5rem;
   border: none;
   border-radius: 8px;
-  font-size: 1rem;
-  font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.test-btn:hover:not(:disabled) {
-  background-color: #2563eb;
-}
-
-.test-btn:disabled {
-  background-color: #9ca3af;
-  cursor: not-allowed;
-}
-
-.error {
-  background-color: #fef2f2;
-  color: #dc2626;
-  padding: 1rem;
-  border-radius: 8px;
-  border: 1px solid #fca5a5;
-  margin-bottom: 1rem;
-}
-
-.result {
-  background-color: #f0fdf4;
-  padding: 1rem;
-  border-radius: 8px;
-  border: 1px solid #bbf7d0;
-}
-
-.result h3 {
-  color: #15803d;
-  margin-top: 0;
-  margin-bottom: 1rem;
-}
-
-.result pre {
-  background-color: #1f2937;
-  color: #f9fafb;
-  padding: 1rem;
-  border-radius: 6px;
-  overflow-x: auto;
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
-.loading {
-  text-align: center;
-  color: #6b7280;
-  font-weight: 500;
-  padding: 2rem;
+  font-size: 1rem;
+  transition: background-color 0.2s, transform 0.2s;
 }
 
 @media (max-width: 640px) {
   .container {
     margin: 1rem;
     padding: 0.5rem;
-  }
-  
-  .test-card {
-    padding: 1.5rem;
   }
   
   h1 {
