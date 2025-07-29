@@ -9,6 +9,7 @@
         const data = await $fetch(url, {
           headers: { 
               'Host': `${subdomain}.undakam.com`,
+              'X-Forwarded-Host': `${subdomain}.undakam.com`
           }
         })
         console.log('Fetched data:', data)
