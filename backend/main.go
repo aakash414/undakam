@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -37,8 +38,27 @@ func init() {
 
 func main() {
 	r := gin.Default()
-	r.Use(cors.Default())
-	r.GET("/*path", handleRequest)
+	config := cors.Config{
+		AllowOrigins: []string{
+			"https://www.undakam.com",
+			"https://undakam.com",
+			"http://localhost:3001",  // for development
+			"https://localhost:3001", // for development with HTTPS
+		},
+		AllowMethods: []string{
+			"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
+		},
+		AllowHeaders: []string{
+			"Origin", "Content-Length", "Content-Type", "Authorization",
+			"Host", "X-Forwarded-Host",
+		},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}
+
+	r.Use(cors.New(config))
+
+	r.GET("/api", handleRequest)
 	log.Println("Server is running on port 8080")
 	r.Run(":8080")
 }
@@ -51,15 +71,15 @@ func handleRequest(c *gin.Context) {
 		host = c.Request.Host
 	}
 
-	subdomain := extractSubdomain(host)
-	log.Printf("Subdomain %s", subdomain)
+	// subdomain := extractSubdomain(host)
+	log.Printf("host %s", host)
 
-	if subdomain == "" || subdomain == "www" {
+	if host == "" || host == "www" {
 		c.String(200, "Welcome to the main site!")
 		return
 	}
 
-	parsed := parseSubdomain(subdomain)
+	parsed := parseSubdomain(host)
 	recipe, err := generateRecipe(parsed.Dish, parsed.Style, parsed.Servings)
 
 	if err != nil {
@@ -69,21 +89,10 @@ func handleRequest(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{
-		"subdomain": subdomain,
+		"subdomain": host,
 		"parsed":    parsed,
 		"recipe":    recipe,
 	})
-}
-
-func extractSubdomain(host string) string {
-	if strings.Contains(host, ":") {
-		host = strings.Split(host, ":")[0]
-	}
-	parts := strings.Split(host, ".")
-	if len(parts) >= 3 {
-		return parts[0]
-	}
-	return ""
 }
 
 func parseSubdomain(subdomain string) *ParsedRecipe {

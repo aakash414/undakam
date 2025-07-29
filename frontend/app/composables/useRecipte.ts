@@ -8,8 +8,7 @@
         console.log('Fetching recipe from:', url, 'for subdomain:', subdomain)    
         const data = await $fetch(url, {
           headers: { 
-              'Host': `${subdomain}.undakam.com`,
-              'X-Forwarded-Host': `${subdomain}.undakam.com`
+              'X-Forwarded-Host': subdomain
           }
         })
         console.log('Fetched data:', data)
