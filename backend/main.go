@@ -50,13 +50,16 @@ func main() {
 		},
 		AllowHeaders: []string{
 			"Origin", "Content-Length", "Content-Type", "Authorization",
-			"Host", "X-Forwarded-Host",
+			"Host", "X-Forwarded-Host", "Content-Language",
 		},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}
 
 	r.Use(cors.New(config))
+	r.OPTIONS("/api", func(c *gin.Context) {
+		c.Status(200)
+	})
 
 	r.GET("/api", handleRequest)
 	log.Println("Server is running on port 8080")
